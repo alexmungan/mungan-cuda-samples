@@ -1,5 +1,5 @@
-/* Contains main() which calls cuSPARSE triangular solvers and my implementations */
-/* Their are multiple implementations of tri solve, each w/ different optimizations to compare performance */
+/* Contains main() which calls the tri solve kernels */
+/* Their are multiple implementations of tri solve - this file tests and profiles them */
 
 int main() {
 
