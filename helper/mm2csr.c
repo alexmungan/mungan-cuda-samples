@@ -16,7 +16,7 @@
 *  arrsize: the dimension size n of an nxn square matrix
 *  nnz: the total number of non zero elements in the sparse matrix
 */
-void mm2csr(char *fname, double AA[], int IA[], int JA[], int DA[], int *arrsize, int *nnz)
+void mm2csr(char *fname, double **AA_ptr, int **IA_ptr, int **JA_ptr, int **DA_ptr, int *arrsize, int *nnz)
 {
     int ret_code;
     MM_typecode matcode;
@@ -79,7 +79,7 @@ void mm2csr(char *fname, double AA[], int IA[], int JA[], int DA[], int *arrsize
     /* convert to CSR format */
     /*************************/
 
-    sparsifymm2csr(nentry, I, J, val, AA, IA, JA, DA, arrsize, nnz);
+    sparsifymm2csr(nentry, I, J, val, AA_ptr, IA_ptr, JA_ptr, DA_ptr, arrsize, nnz);
 
     /************************/
     /* now write out matrix */

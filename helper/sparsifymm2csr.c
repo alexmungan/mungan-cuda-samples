@@ -19,8 +19,8 @@
 *  arrsize: the dimension size n of an nxn square matrix
 *  nnz: the total number of non zero elements in the sparse matrix
 */
-void sparsifymm2csr(int nentry, int rowidx[], int colidx[], double val[], double AA[], 
-			int IA[], int JA[], int DA[], int *arrsize_ret, int *nnz_ret)
+void sparsifymm2csr(int nentry, int rowidx[], int colidx[], double val[], double **AA_ptr, 
+			int **IA_ptr, int **JA_ptr, int **DA_ptr, int *arrsize_ret, int *nnz_ret)
 {
 // Inputs:
 //    nentry: length of rowidx, colidx and val 
@@ -57,7 +57,7 @@ void sparsifymm2csr(int nentry, int rowidx[], int colidx[], double val[], double
 
    if (imax != jmax) {
       printf("Error: the matrix is not a square matrix. imax = %d and jmax = %d\n",imax,jmax);
-      return 1;
+      return;
    }
    else {
       arrsize = imax + 1;
@@ -67,7 +67,7 @@ void sparsifymm2csr(int nentry, int rowidx[], int colidx[], double val[], double
    printf("number of nonzero diagonal elements (ndiag = %d)\n",ndiag);
    if (ndiag < arrsize) {
        printf("Warning: %d diagonal elements are zero.\n",arrsize-ndiag);
-       return 1;
+       return;
    }
    else {
        printf("FYI: all diagonal elements are nonzero.\n");
@@ -95,10 +95,22 @@ void sparsifymm2csr(int nentry, int rowidx[], int colidx[], double val[], double
    printf("number of total nonzeros elements (nnz = %d)\n",nnz);
 
 // allocate memory
-   AA = malloc(nnz*sizeof(*AA));
-   IA = malloc((arrsize+1)*sizeof(*IA));
-   DA = malloc(arrsize*sizeof(*DA));
-   JA = malloc(nnz*sizeof(*JA));
+   *AA_ptr = malloc(nnz*sizeof(double));
+   *IA_ptr = malloc((arrsize+1)*sizeof(int));
+   *DA_ptr = malloc(arrsize*sizeof(int));
+   *JA_ptr = malloc(nnz*sizeof(int));
+// Rename pointers	
+   double *AA;
+   int *IA, *JA, *DA;
+   AA = *AA_ptr;
+   IA = *IA_ptr;
+   JA = *JA_ptr;
+   DA = *DA_ptr;
+   
+   if(!AA || !IA || !DA || !JA) {
+   	fprintf(stderr, "Could not allocate memory");
+   	exit(EXIT_FAILURE);
+   }
 
    // let IA temporarily store the number of entry each row
    memset(IA, 0, (arrsize+1)*sizeof(*IA));
@@ -157,15 +169,9 @@ void sparsifymm2csr(int nentry, int rowidx[], int colidx[], double val[], double
    }
 
 /*
-// test code
-for (i = 0; i < arrsize; i++) {
-    k1 = IA[i];               
-    k2 = IA[i+1] - 1;                
-    printf("row %d has %d nonzeros and DA[%d] = %d\n",i,k2-k1+1,i,DA[i]);
-    for (k = k1; k <= k2; k++) {
-        printf("  i %d: JA[%d] = %d\n",i, k,JA[k]);
-    }
-}
+	for(int i = 0; i < 20; i++) {
+		printf("%f\n", AA[i]);
+	}
 */
    *arrsize_ret = arrsize;
    *nnz_ret = nnz;

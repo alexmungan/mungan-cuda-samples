@@ -15,7 +15,7 @@ extern "C" {
 *  arrsize: the dimension size n of an nxn square matrix
 *  nnz: the total number of non zero elements in the sparse matrix
 */
-void mm2csr(char *fname, double AA[], int IA[], int JA[], int DA[], int *arrsize, int *nnz);
+void mm2csr(char *fname, double **AA, int **IA, int **JA, int **DA, int *arrsize, int *nnz);
 
 #ifdef __cplusplus
 }
