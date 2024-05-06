@@ -12,27 +12,11 @@
 #include "cuBLASErrHandler.cuh"
 #include "cuSPARSEErrHandler.cuh"
 
+#include "csr2csc.cuh"
+#include "tri_solvers.cuh"
+
 #define eps 1.0e-5
 #define loop 1024
-
-//CPU SOLVER: used for correctness checks
-void csr_solve_lower_tri_system(double AA[], int IA[], int JA[], int DA[], int nn, double x[], double r[])
-{
-// Purpose: compute (I + Low_tri(A))*x, return modified x.
-// x[] input as the rhs vector, output as the solution.
-
-    int idx,k1,k2,k,j;
-
-    for (idx = 0; idx < nn; idx++) {   // compressed sparse row format
-        k1 = IA[idx];
-        k2 = DA[idx] - 1;
-        x[idx] = r[idx];
-        for (k = k1; k <= k2; k++) {
-            j = JA[k];
-            x[idx] -= AA[k]*x[j];
-        }
-    }
-}
 
 //Random number generator
 double RNG(double min, double max) {
@@ -74,11 +58,13 @@ int main() {
 /****	Run CPU solver (results used for correctness checks)	****/
 	double *x_correct = (double *)malloc(vecSize);
 	
+	printf("Running single-threaded CPU solver...");
 	clock_t startTime = clock();
 	for(int i = 0; i < loop; i++) {
 		csr_solve_lower_tri_system(AA, IA, JA, DA, arrsize, x_correct, r);
 	}
 	clock_t stopTime = clock();
+	printf("DONE!\n");
 	double cpuTime = ((double)stopTime-startTime)/CLOCKS_PER_SEC;
 	cpuTime = cpuTime / loop;
 /*******************************************************************/
@@ -93,6 +79,7 @@ int main() {
 	cusparseHandle_t handle;
     	cusparseErrchk(cusparseCreate(&handle));
     	
+    	printf("Running cusparse tri solver...");
     	startTime = clock();
     	
     	//cusparse matrix description
@@ -146,6 +133,7 @@ int main() {
 	gpuErrchk(cudaMemcpy(x_cusparse, d_x_cusparse, vecSize, cudaMemcpyDeviceToHost));	
 	gpuErrchk(cudaFree(dBuffer));
 	stopTime = clock();
+	printf("DONE!\n");
 	double cusparseTriSolverTime = ((double)stopTime-startTime)/CLOCKS_PER_SEC;
 	cusparseTriSolverTime = cusparseTriSolverTime / loop;
 	
@@ -164,10 +152,37 @@ int main() {
 	if(passed)
 		printf("cuSPARSE_tri_solver PASS\n"); 
 /***************************************/
+
+/****	Profile my GPU only tri solver ****/
+	printf("Running myGpuSolver_1...\n");
+	double *x_mygpu = (double *)malloc(vecSize);
+	//TODO: 0 initialize?????
+	
+    	startTime = clock();
+    	
+    	//Memcopies 
+    	
+    	//Convert to CSC for fast col access
+    	double *csc_AA = (double *)malloc(nnz * sizeof(double));
+    	int *csc_JA = (int *)malloc((arrsize+1) * sizeof(int));
+    	int *csc_IA = (int *)malloc(nnz * sizeof(int));	
+    	csr2csc(AA, IA, JA, csc_AA, csc_JA, csc_IA, arrsize, nnz);
+    	printf("Matrix converted to CSC format!\n");
+    	
+    	//
+    	
+	
+	stopTime = clock();
+	printf("DONE!\n");
+	double myGpuSolverTime = ((double)stopTime-startTime)/CLOCKS_PER_SEC;
+
+/******************************************/
+
 	
 /****	Output Results for Unit Triangular Solvers	****/
 	printf("(Single-threaded) CPU_tri_solver execution time: %fms\n", cpuTime);
 	printf("cuSPARSE_tri_solver execution time: %fms\n", cusparseTriSolverTime);
+	printf("myGpuSolver_1 execution time: %fms\n", myGpuSolverTime);
 /***********************************************************/
 	
 /****	Free Resources	****/
@@ -176,6 +191,9 @@ int main() {
 	free(IA);
 	free(JA);
 	free(DA);
+	free(csc_AA);
+	free(csc_JA);
+	free(csc_IA);
 	//Free device matrix
 	gpuErrchk(cudaFree(d_AA));
 	gpuErrchk(cudaFree(d_IA));
