@@ -1,4 +1,4 @@
 *.o
 *.d
 cuTriSolve
-../../data/matrices/sparse/posdef/*
+../../data/matrices/sparse/posdef/*.mtx
