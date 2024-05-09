@@ -7,10 +7,9 @@
  * arrsize: num of cols / rows of the symmetric posdef input
  * nnz: num of non zero elements
  * colHeadPtrs: array of pointers to the current head of each column in AA, Note: should be passed in 0-initialized
+ * nnzPerColAbove/Below: indicates how many non zero elements there are above or below the diagonal in that column
  */
- #include <stdio.h>
-__host__ void csr2csc(double *AA, int *IA, int *JA, double *csc_AA, int *csc_JA, int *csc_IA, int arrsize, int nnz,
-			int *colHeadPtrs) {
+__host__ void csr2csc(double *AA, int *IA, int *JA, double *csc_AA, int *csc_JA, int *csc_IA, int *csc_DA, int *nnzPerColAbove, int *nnzPerColBelow, int arrsize, int nnz, int *colHeadPtrs) {
 	
 	//Loop through CSR JA[] to get size of each column
 	for(int i = 0; i < nnz; i++) {
@@ -29,6 +28,15 @@ __host__ void csr2csc(double *AA, int *IA, int *JA, double *csc_AA, int *csc_JA,
 		for(int k = k1; k <= k2; k++) {
 			int j = JA[k];
 			int currElement = csc_JA[j] + colHeadPtrs[j];
+			if(rowidx == j) {
+				csc_DA[j] = colHeadPtrs[j];
+			}
+			else if (rowidx < j) {
+				nnzPerColAbove[j]++;
+			}
+			else {
+				nnzPerColBelow[j]++;
+			}
 			if(currElement <= (csc_JA[j+1]-1)) {
 				csc_AA[currElement] = AA[k];
 				csc_IA[currElement] = rowidx;
@@ -59,7 +67,7 @@ __host__ void cu_csr2csc_part2(int *csc_JA, int arrsize) {
     	}
 }
 /* Part 3 */			
-__global__ void cu_csr2csc_part3(double *d_AA, int *d_IA, int *d_JA, double *d_csc_AA, int *d_csc_JA, int *d_csc_IA, int *d_colHeadPtrs, int rowidx) {
+__global__ void cu_csr2csc_part3(double *d_AA, int *d_IA, int *d_JA, double *d_csc_AA, int *d_csc_JA, int *d_csc_IA, int *d_csc_DA, int *d_colHeadPtrs, int *nnzPerColAbove, int *nnzPerColBelow, int rowidx) {
 	int gid = blockIdx.x * blockDim.x + threadIdx.x;
 	//Populate csc_AA and csc_IA
 	int k1 = d_IA[rowidx];
@@ -68,6 +76,15 @@ __global__ void cu_csr2csc_part3(double *d_AA, int *d_IA, int *d_JA, double *d_c
 	if(k <= k2) {
 		int j = d_JA[k];
 		int currElement = d_csc_JA[j] + d_colHeadPtrs[j];
+		if(rowidx == j) {
+				d_csc_DA[j] = d_colHeadPtrs[j];
+		}
+		else if (rowidx < j) {
+				nnzPerColAbove[j]++;
+		}
+		else {
+			nnzPerColBelow[j]++;
+		}
 		if(currElement <= (d_csc_JA[j+1]-1)) {
 			d_csc_AA[currElement] = d_AA[k];
 			d_csc_IA[currElement] = rowidx;

@@ -17,6 +17,7 @@
 
 #define eps 1.0e-5
 #define loop 1024 //For profiling: number of times to run some operation being profiled in a loop
+#define loop_expensive 1 //For operations that take longer, make their profile loop run for less iterations
 
 //Random number generator
 double RNG(double min, double max) {
@@ -66,7 +67,7 @@ int main() {
 	clock_t stopTime = clock();
 	printf("DONE!\n");
 	double cpuTime = ((double)stopTime-startTime)/CLOCKS_PER_SEC;
-	cpuTime = cpuTime / loop;
+	//cpuTime = cpuTime / loop;
 /*******************************************************************/
 
 /****	Profile cuSPARSE tri solver ****/
@@ -135,7 +136,7 @@ int main() {
 	stopTime = clock();
 	printf("DONE!\n");
 	double cusparseTriSolverTime = ((double)stopTime-startTime)/CLOCKS_PER_SEC;
-	cusparseTriSolverTime = cusparseTriSolverTime / loop;
+	//cusparseTriSolverTime = cusparseTriSolverTime / loop;
 	
 	//free device result
 	gpuErrchk(cudaFree(d_r_cusparse));
@@ -151,6 +152,9 @@ int main() {
 	}
 	if(passed)
 		printf("cuSPARSE_tri_solver PASS\n"); 
+		
+	//free mem
+	free(x_cusparse);
 /***************************************/
 
 /**** Profile and test CPU vs GPU csr2csc routines ****/
@@ -159,29 +163,54 @@ int main() {
 	double totalTime = 0;
 	
 	double *cpu_csc_AA;
-    	int *cpu_csc_JA, *cpu_csc_IA, *cpu_colHeadPtrs;
+    	int *cpu_csc_JA, *cpu_csc_IA, *cpu_csc_DA, *cpu_colHeadPtrs, *nnzPerColAbove, *nnzPerColBelow;
+    	 
+    	//GPU CSC (just for profiling memcpy)
+    	double *gpu_csc_AA;
+    	int *gpu_csc_JA, *gpu_csc_IA, *gpu_csc_DA;
     	
-    	for(int i = 0; i < loop; i++) {
+    	//NOTE: the larger loop_expensive gets, the longer the average iteration takes for some reason... probably something to do w/ memory allocation
+    	for(int i = 0; i < loop_expensive; i++) {
     	    	startTime = clock();
     	    	cpu_csc_AA = (double *)malloc(nnz * sizeof(double));
     		cpu_csc_JA = (int *)calloc((arrsize+1), sizeof(int));  //zeroed    		
     		cpu_csc_IA = (int *)malloc(nnz * sizeof(int));	
+    		cpu_csc_DA = (int *)malloc(arrsize * sizeof(int));
 		cpu_colHeadPtrs = (int *)calloc(arrsize, sizeof(int)); //zeroed
+		nnzPerColAbove = (int *)calloc(arrsize, sizeof(int)); //zeroed
+		nnzPerColBelow = (int *)calloc(arrsize, sizeof(int)); //zeroed
 		
-    	    	csr2csc(AA, IA, JA, cpu_csc_AA, cpu_csc_JA, cpu_csc_IA, arrsize, nnz, cpu_colHeadPtrs);
+    	    	csr2csc(AA, IA, JA, cpu_csc_AA, cpu_csc_JA, cpu_csc_IA, cpu_csc_DA, nnzPerColAbove, nnzPerColBelow, arrsize, nnz, cpu_colHeadPtrs);
+    	    	
+    	    	//Include memcpy time to gpu b/c in real application we would still need to copy to gpu after converting on cpu
+		gpuErrchk(cudaMalloc((void**)&gpu_csc_AA, nnz*sizeof(double)));
+		gpuErrchk(cudaMalloc((void**)&gpu_csc_JA, (arrsize+1)*sizeof(int)));   	 	
+    	    	gpuErrchk(cudaMalloc((void**)&gpu_csc_IA, nnz*sizeof(int)));
+    	    	gpuErrchk(cudaMalloc((void**)&gpu_csc_DA, arrsize * sizeof(int)));
+    		gpuErrchk(cudaMemcpy(gpu_csc_AA, cpu_csc_AA, nnz*sizeof(double), cudaMemcpyHostToDevice));
+    		gpuErrchk(cudaMemcpy(gpu_csc_JA, cpu_csc_JA, (arrsize+1)*sizeof(int), cudaMemcpyHostToDevice));
+    		gpuErrchk(cudaMemcpy(gpu_csc_IA, cpu_csc_IA, nnz*sizeof(int), cudaMemcpyHostToDevice));
+    		gpuErrchk(cudaMemcpy(gpu_csc_DA, cpu_csc_DA, arrsize*sizeof(int), cudaMemcpyHostToDevice));
     	    	
     	    	stopTime = clock();
     	    	totalTime += (stopTime-startTime);
     	    	
     	    	free(cpu_colHeadPtrs);
+    	    	gpuErrchk(cudaFree(gpu_csc_AA));
+    	    	gpuErrchk(cudaFree(gpu_csc_JA));
+    	    	gpuErrchk(cudaFree(gpu_csc_IA));
+    	    	gpuErrchk(cudaFree(gpu_csc_DA));
     	    	
     	    	//If its the last iteration, keep results so we can use to compare against gpu results
-    	    	if(i == (loop-1))
+    	    	if(i == (loop_expensive-1))
     	    		break;
     	    		
     	    	free(cpu_csc_AA);
 		free(cpu_csc_JA);
 		free(cpu_csc_IA);
+		free(cpu_csc_DA);
+		free(nnzPerColAbove);
+		free(nnzPerColBelow);
     	}
     	
 
@@ -193,11 +222,13 @@ int main() {
     	//Gpu CSR
     	double *gpu_AA; 
     	int *gpu_IA, *gpu_JA;   
-    	//GPU CSC	
-    	double *gpu_csc_AA;
-    	int *gpu_csc_JA, *gpu_csc_IA, *gpu_colHeadPtrs;
+    	//GPU CSC
+    	int *gpu_colHeadPtrs, *gpu_nnzPerColAbove, *gpu_nnzPerColBelow;
+    	//CPU control variables
+    	int *test_nnzPerColAbove, *test_nnzPerColBelow;
     	
-    	for(int i = 0; i < loop; i++) {
+    	//NOTE: the larger loop_expensive gets, the longer the average iteration takes for some reason... probably something to do w/ memory allocation
+    	for(int i = 0; i < loop_expensive; i++) {
     	    	startTime = clock();
     	    	//GPU CSR 
     	    	gpuErrchk(cudaMalloc((void**)&gpu_AA, nnz*sizeof(double)));
@@ -212,12 +243,17 @@ int main() {
     	    	gpuErrchk(cudaMalloc((void**)&gpu_csc_JA, (arrsize+1)*sizeof(int)));
     	    	gpuErrchk(cudaMemset(gpu_csc_JA, 0, (arrsize+1)*sizeof(int)));  //zeroed
     	    	gpuErrchk(cudaMalloc((void**)&gpu_csc_IA, nnz*sizeof(int)));
+    	    	gpuErrchk(cudaMalloc((void**)&gpu_csc_DA, arrsize * sizeof(int)));
     	    	gpuErrchk(cudaMalloc((void**)&gpu_colHeadPtrs, arrsize * sizeof(int)));
     	    	gpuErrchk(cudaMemset(gpu_colHeadPtrs, 0, arrsize*sizeof(int))); //zeroed
+    	    	gpuErrchk(cudaMalloc((void**)&gpu_nnzPerColAbove, arrsize * sizeof(int)));
+    	    	gpuErrchk(cudaMemset(gpu_nnzPerColAbove, 0, arrsize*sizeof(int))); //zeroed
+    	    	gpuErrchk(cudaMalloc((void**)&gpu_nnzPerColBelow, arrsize * sizeof(int)));
+    	    	gpuErrchk(cudaMemset(gpu_nnzPerColBelow, 0, arrsize*sizeof(int))); //zeroed
     	    	
     	    	/* KERNEL */
 		int blockSize = 128;
-		dim3 nnzGridSize(((nnz + blockSize - 1)/ blockSize),1,1);
+		int nnzGridSize = (nnz + blockSize - 1)/ blockSize;
 		cu_csr2csc_part1<<<nnzGridSize, blockSize>>>(gpu_JA, gpu_csc_JA, nnz);
 		
 		int *host_csc_JA = (int *)malloc((arrsize+1)*sizeof(int));
@@ -226,15 +262,25 @@ int main() {
 		gpuErrchk(cudaMemcpy(gpu_csc_JA, host_csc_JA, (arrsize+1)*sizeof(int), cudaMemcpyHostToDevice));
 		free(host_csc_JA);
 		
-		dim3 arrsizeGridSize(((arrsize + blockSize - 1)/ blockSize),1,1);
+		int nnzRow, nnzRowGridSize; 
 		for(int rowidx = 0; rowidx < arrsize; rowidx++) {
-			cu_csr2csc_part3<<<arrsizeGridSize, blockSize>>>(gpu_AA, gpu_IA, gpu_JA, gpu_csc_AA, gpu_csc_JA, gpu_csc_IA, gpu_colHeadPtrs, rowidx);
+			nnzRow = IA[rowidx+1] - IA[rowidx];
+			nnzRowGridSize = (nnzRow + blockSize - 1) / blockSize;
+			cu_csr2csc_part3<<<nnzRowGridSize, blockSize>>>(gpu_AA, gpu_IA, gpu_JA, gpu_csc_AA, gpu_csc_JA, gpu_csc_IA, gpu_csc_DA, gpu_colHeadPtrs, gpu_nnzPerColAbove, gpu_nnzPerColBelow, rowidx);
 			//implicit global sync for each kernel call
 			//Basic Kernel Error Checking
 			gpuErrchk( cudaPeekAtLastError() );
         		gpuErrchk( cudaDeviceSynchronize() );
 		}	
-    	    	/**********/   	    	
+    	    	/**********/   	   
+    	    	
+    	    	//Realistically, nnzPerCol arrays are needed on the CPU
+    	    	test_nnzPerColAbove = (int *)malloc(arrsize * sizeof(int)); //zeroed
+		test_nnzPerColBelow = (int *)malloc(arrsize * sizeof(int)); //zeroed
+		gpuErrchk(cudaMemcpy(test_nnzPerColAbove, gpu_nnzPerColAbove, arrsize*sizeof(int), cudaMemcpyDeviceToHost));
+     		gpuErrchk(cudaMemcpy(test_nnzPerColBelow, gpu_nnzPerColBelow, arrsize*sizeof(int), cudaMemcpyDeviceToHost));
+     		gpuErrchk(cudaFree(gpu_nnzPerColAbove));
+    	    	gpuErrchk(cudaFree(gpu_nnzPerColBelow));
     	    	
     	    	stopTime = clock();
     	    	totalTime += (stopTime-startTime);
@@ -245,25 +291,28 @@ int main() {
     	    	gpuErrchk(cudaFree(gpu_colHeadPtrs));
     	    	
     	    	//If its the last iteration, don't free csc mem, so we can check gpu results
-    	    	if(i == (loop-1))
+    	    	if(i == (loop_expensive-1))
     	    		break;
     	    	
     	    	gpuErrchk(cudaFree(gpu_csc_AA));
     	    	gpuErrchk(cudaFree(gpu_csc_JA));
     	    	gpuErrchk(cudaFree(gpu_csc_IA));
-    	    			
+    	    	gpuErrchk(cudaFree(gpu_csc_DA));
     	}
     	
     	//GPU Correctness Check -----
     	double *test_csc_AA = (double *)malloc(nnz * sizeof(double));
     	int *test_csc_JA = (int *)malloc((arrsize+1) * sizeof(int));    		
     	int *test_csc_IA = (int *)malloc(nnz * sizeof(int));	
+    	int *test_csc_DA = (int *)malloc(arrsize * sizeof(int));
     	gpuErrchk(cudaMemcpy(test_csc_AA, gpu_csc_AA, nnz*sizeof(double), cudaMemcpyDeviceToHost));
     	gpuErrchk(cudaMemcpy(test_csc_JA, gpu_csc_JA, (arrsize+1) * sizeof(int), cudaMemcpyDeviceToHost));
     	gpuErrchk(cudaMemcpy(test_csc_IA, gpu_csc_IA, nnz * sizeof(int), cudaMemcpyDeviceToHost));
+    	gpuErrchk(cudaMemcpy(test_csc_DA, gpu_csc_DA, arrsize*sizeof(int), cudaMemcpyDeviceToHost));
 	gpuErrchk(cudaFree(gpu_csc_AA));
     	gpuErrchk(cudaFree(gpu_csc_JA));
     	gpuErrchk(cudaFree(gpu_csc_IA));
+    	gpuErrchk(cudaFree(gpu_csc_DA));
     	
     	//check
     	passed = true;
@@ -286,6 +335,23 @@ int main() {
     			    			passed = false;
     		}
     	}
+    	for(int i = 0; i < arrsize; i++) {
+    		if(abs(test_csc_DA[i] - cpu_csc_DA[i]) > eps) {
+  	    		fprintf(stderr, "csr2csc test failed! CSC diagonal indices arrays do not match --> \
+    			CPU_DA[%d] = %d. GPU_DA[%d] = %d\n", i, cpu_csc_DA[i], i, test_csc_DA[i]);
+    			    			passed = false;
+    		}
+    		if(abs(test_nnzPerColAbove[i] - nnzPerColAbove[i]) > eps) {
+  	    		fprintf(stderr, "csr2csc test failed! nnzPerColAbove arrays do not match --> \
+    			CPU[%d] = %d. GPU[%d] = %d\n", i, nnzPerColAbove[i], i, test_nnzPerColAbove[i]);
+    			    			passed = false;
+    		}
+    		if(abs(test_nnzPerColBelow[i] - nnzPerColBelow[i]) > eps) {
+  	    		fprintf(stderr, "csr2csc test failed! nnzPerColAbove arrays do not match --> \
+    			CPU[%d] = %d. GPU[%d] = %d\n", i, nnzPerColBelow[i], i, test_nnzPerColBelow[i]);
+    			    			passed = false;
+    		}
+    	}
     	if(!passed)
     		printf("gpu csr2csc failed!\n");
     	else
@@ -295,9 +361,15 @@ int main() {
     	free(cpu_csc_AA);
 	free(cpu_csc_JA);
 	free(cpu_csc_IA);
+	free(cpu_csc_DA);
+	free(nnzPerColAbove);
+	free(nnzPerColBelow);
 	free(test_csc_AA);
 	free(test_csc_JA);
 	free(test_csc_IA);
+	free(test_csc_DA);
+	free(test_nnzPerColAbove);
+	free(test_nnzPerColBelow);
 	//----------------------------
 
     	double gpu_csr2csc_time = ((double)totalTime)/CLOCKS_PER_SEC;
@@ -307,37 +379,95 @@ int main() {
 
 /******************************************************/
 
-/****	Profile my GPU only tri solver ****/
-	printf("Running myGpuSolver_1...");
-	double *x_mygpu = (double *)malloc(vecSize);
-	//TODO: 0 initialize?????
+/****	Profile my first unoptimized GPU tri solver ****/
+	printf("Running myGpuLowerSolver_1...");
+	double *d_x;
+	gpuErrchk(cudaMalloc((void**)&d_x, vecSize));
+	gpuErrchk(cudaMemcpy(d_x, r, vecSize, cudaMemcpyHostToDevice));
 	
     	startTime = clock();
     	
-    	//Memcopies 
-    	
     	//Convert to CSC for fast col access
-    	//double *csc_AA = (double *)malloc(nnz * sizeof(double));
-    	//int *csc_JA = (int *)malloc((arrsize+1) * sizeof(int));
-    	//int *csc_IA = (int *)malloc(nnz * sizeof(int));	
-    	//csr2csc(AA, IA, JA, csc_AA, csc_JA, csc_IA, arrsize, nnz);
-    	//printf("Matrix converted to CSC format!\n");
+    	double *h_csc_AA = (double *)malloc(nnz * sizeof(double));
+    	int *h_csc_JA = (int *)calloc((arrsize+1), sizeof(int)); //zeroed
+    	int *h_csc_IA = (int *)malloc(nnz * sizeof(int));	
+    	int *h_csc_DA = (int *)malloc(arrsize * sizeof(int));
+    	int *h_colHeadPtrs = (int *)calloc(arrsize, sizeof(int));//zeroed
+    	int *h_nnzPerColAbove =  (int *)calloc(arrsize, sizeof(int));//zeroed
+    	int *h_nnzPerColBelow =(int *)calloc(arrsize, sizeof(int));//zeroed
+    	csr2csc(AA, IA, JA, h_csc_AA, h_csc_JA, h_csc_IA, h_csc_DA, h_nnzPerColAbove, h_nnzPerColBelow, arrsize, nnz, h_colHeadPtrs);
+    	//Free mem not needed
+    	free(h_colHeadPtrs); 
+    	free(h_nnzPerColAbove);
+    		
+    	//Copy the CSC matrix to GPU
+    	double *d_csc_AA;
+    	int *d_csc_JA, *d_csc_IA, *d_csc_DA;
+    	gpuErrchk(cudaMalloc((void**)&d_csc_AA, nnz * sizeof(double)));
+    	gpuErrchk(cudaMalloc((void**)&d_csc_JA, (arrsize+1) * sizeof(int)));
+    	gpuErrchk(cudaMalloc((void**)&d_csc_IA, nnz * sizeof(int)));
+    	gpuErrchk(cudaMalloc((void**)&d_csc_DA, arrsize * sizeof(int)));
+    	gpuErrchk(cudaMemcpy(d_csc_AA, h_csc_AA, nnz * sizeof(double), cudaMemcpyHostToDevice));
+    	gpuErrchk(cudaMemcpy(d_csc_JA, h_csc_JA, (arrsize+1) * sizeof(int), cudaMemcpyHostToDevice));
+    	gpuErrchk(cudaMemcpy(d_csc_IA, h_csc_IA, nnz * sizeof(int), cudaMemcpyHostToDevice));
+    	gpuErrchk(cudaMemcpy(d_csc_DA, h_csc_DA, arrsize * sizeof(int), cudaMemcpyHostToDevice));
     	
-    	//
-    	
+    	/*** Run the triangular solver ***/
+    	//Get numOfBlocks for each iteration
+    	int blockSize = 128;
+    	int *numOfBlocksPerCol = (int *)malloc(arrsize * sizeof(int));
+    	get_numOfBlocksPerCol(numOfBlocksPerCol, h_nnzPerColBelow, blockSize, arrsize);
+    	free(h_nnzPerColBelow);
+    	//Call the solver
+    	for(int i = 0; i < loop; i++) {
+    	    	myGpuLowerTriSolver_1(d_csc_AA, d_csc_JA, d_csc_IA, d_csc_DA, numOfBlocksPerCol, arrsize, blockSize, d_x);
+    	}
+    	/*********************************/
 	
 	stopTime = clock();
 	printf("DONE!\n");
-	double myGpuSolverTime = ((double)stopTime-startTime)/CLOCKS_PER_SEC;
-	myGpuSolverTime = myGpuSolverTime / loop;
-
+	double myGpuSolver1Time = ((double)stopTime-startTime)/CLOCKS_PER_SEC;
+	
+	//Copy the results back
+	double *x_myGpuSolver_1 = (double *)malloc(vecSize);
+	gpuErrchk(cudaMemcpy(x_myGpuSolver_1, d_x, vecSize, cudaMemcpyDeviceToHost));
+	
+	//TEST FOR CORRECTNESS
+	passed = true;
+	for(int i = 0; i < arrsize; i++) {
+		if(abs(x_myGpuSolver_1[i] - x_correct[i]) > eps) {
+			passed = false;
+			fprintf(stderr, "myGpuLowerSolver_1 failed at d_x[%d] = %f, x[%d] = %f!\n", i, x_myGpuSolver_1[i], i, x_correct[i]);
+		}
+	}
+	if(passed)
+		printf("myGpuLowerSolver PASS\n"); 
+		
+	//free device mem
+	gpuErrchk(cudaFree(d_csc_AA));
+	gpuErrchk(cudaFree(d_csc_JA));
+	gpuErrchk(cudaFree(d_csc_IA));
+	gpuErrchk(cudaFree(d_csc_DA));
+	gpuErrchk(cudaFree(d_x));
+	
+	//free host mem
+	free(h_csc_AA);
+	free(h_csc_JA);
+	free(h_csc_IA);
+	free(h_csc_DA);
+	free(x_myGpuSolver_1);
 /******************************************/
 
 	
 /****	Output Results for Unit Triangular Solvers	****/
+	printf("\nRESULTS: average timing for %d executions.\n", loop);
+	printf("(Single-threaded) CPU_tri_solver execution time: %fs\n", cpuTime/loop);
+	printf("cuSPARSE_tri_solver execution time: %fs\n", cusparseTriSolverTime/loop);
+	printf("myGpuLowerSolver_1 execution time: %fs\n", myGpuSolver1Time/loop);
+	printf("\nRESULTS: total times for %d executions.\n", loop);
 	printf("(Single-threaded) CPU_tri_solver execution time: %fs\n", cpuTime);
 	printf("cuSPARSE_tri_solver execution time: %fs\n", cusparseTriSolverTime);
-	printf("myGpuSolver_1 execution time: %fs\n", myGpuSolverTime);
+	printf("myGpuLowerSolver_1 execution time: %fs\n", myGpuSolver1Time);
 /***********************************************************/
 	
 /****	Free Resources	****/
@@ -351,10 +481,9 @@ int main() {
 	gpuErrchk(cudaFree(d_IA));
 	gpuErrchk(cudaFree(d_JA));
 	//gpuErrchk(cudaFree(d_DA));
-	//Free RHS
+	//Free Vectors
 	free(r);
 	free(x_correct);
-	free(x_cusparse);
 	//destroy matrix/vector descriptors
     	cusparseErrchk( cusparseDestroySpMat(matA) );
     	cusparseErrchk( cusparseDestroyDnVec(vecR) );
