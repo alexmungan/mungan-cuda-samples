@@ -12,11 +12,13 @@ lib_src_list := $(foreach item,$(lib_src_temp),$(call add_prefix,$(item)))
 
 #List of source files
 CU_srcs			:= $(wildcard ./*.cu)
+C_srcs			:= $(wildcard ./*.c)
 
 #List of objects
 lib_objs		:= $(subst .c,.o,${lib_src_temp})
 CU_objs			:= $(subst .cu,.o,${CU_srcs})
-OBJS			:= $(lib_objs) $(CU_objs)
+C_objs			:= $(subst .c,.o,${C_srcs})
+OBJS			:= $(lib_objs) $(CU_objs) $(C_objs)
 
 #Compilers
 CC = gcc
@@ -37,6 +39,9 @@ ${lib_objs}: %.o: ${lib_src_dir}/%.c
 
 %.o: %.cu
 	${NVCC} -dc ${FLAGS}  $< -o $@
+
+%.o: %.c
+	${CC} -c $< -o $@ ${FLAGS}  
 
 .PHONY: clean help
 

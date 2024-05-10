@@ -5,6 +5,8 @@
 #include <float.h>
 
 #include "mm2csr.h"
+#include "mm2ccrbtri.h"
+#include "global_ccrbtri_mat.h"
 
 #include <cusparse.h>
 
@@ -380,7 +382,7 @@ int main() {
 /******************************************************/
 
 /****	Profile my first unoptimized GPU tri solver ****/
-	printf("Running myGpuLowerSolver_1...");
+	/*printf("Running myGpuLowerSolver_1...");
 	double *d_x;
 	gpuErrchk(cudaMalloc((void**)&d_x, vecSize));
 	gpuErrchk(cudaMemcpy(d_x, r, vecSize, cudaMemcpyHostToDevice));
@@ -411,20 +413,20 @@ int main() {
     	gpuErrchk(cudaMemcpy(d_csc_JA, h_csc_JA, (arrsize+1) * sizeof(int), cudaMemcpyHostToDevice));
     	gpuErrchk(cudaMemcpy(d_csc_IA, h_csc_IA, nnz * sizeof(int), cudaMemcpyHostToDevice));
     	gpuErrchk(cudaMemcpy(d_csc_DA, h_csc_DA, arrsize * sizeof(int), cudaMemcpyHostToDevice));
-    	
+    	*/
     	/*** Run the triangular solver ***/
     	//Get numOfBlocks for each iteration
-    	int blockSize = 128;
+    	/*int blockSize = 128;
     	int *numOfBlocksPerCol = (int *)malloc(arrsize * sizeof(int));
     	get_numOfBlocksPerCol(numOfBlocksPerCol, h_nnzPerColBelow, blockSize, arrsize);
     	free(h_nnzPerColBelow);
     	//Call the solver
     	for(int i = 0; i < loop; i++) {
     	    	myGpuLowerTriSolver_1(d_csc_AA, d_csc_JA, d_csc_IA, d_csc_DA, numOfBlocksPerCol, arrsize, blockSize, d_x);
-    	}
+    	}*/
     	/*********************************/
 	
-	stopTime = clock();
+	/*stopTime = clock();
 	printf("DONE!\n");
 	double myGpuSolver1Time = ((double)stopTime-startTime)/CLOCKS_PER_SEC;
 	
@@ -456,19 +458,9 @@ int main() {
 	free(h_csc_IA);
 	free(h_csc_DA);
 	free(x_myGpuSolver_1);
+	*/
 /******************************************/
 
-	
-/****	Output Results for Unit Triangular Solvers	****/
-	printf("\nRESULTS: average timing for %d executions.\n", loop);
-	printf("(Single-threaded) CPU_tri_solver execution time: %fs\n", cpuTime/loop);
-	printf("cuSPARSE_tri_solver execution time: %fs\n", cusparseTriSolverTime/loop);
-	printf("myGpuLowerSolver_1 execution time: %fs\n", myGpuSolver1Time/loop);
-	printf("\nRESULTS: total times for %d executions.\n", loop);
-	printf("(Single-threaded) CPU_tri_solver execution time: %fs\n", cpuTime);
-	printf("cuSPARSE_tri_solver execution time: %fs\n", cusparseTriSolverTime);
-	printf("myGpuLowerSolver_1 execution time: %fs\n", myGpuSolver1Time);
-/***********************************************************/
 	
 /****	Free Resources	****/
 	//Free host matrix
@@ -479,11 +471,7 @@ int main() {
 	//Free device matrix
 	gpuErrchk(cudaFree(d_AA));
 	gpuErrchk(cudaFree(d_IA));
-	gpuErrchk(cudaFree(d_JA));
-	//gpuErrchk(cudaFree(d_DA));
-	//Free Vectors
-	free(r);
-	free(x_correct);
+	gpuErrchk(cudaFree(d_JA));	
 	//destroy matrix/vector descriptors
     	cusparseErrchk( cusparseDestroySpMat(matA) );
     	cusparseErrchk( cusparseDestroyDnVec(vecR) );
@@ -492,6 +480,27 @@ int main() {
     	cusparseErrchk(cusparseDestroy(handle));
 /***************************/
 
+/****	Profile my Optimized GPU tri solver ****/	
+	mm2ccrbtri(filepath);
+	printf("Matrix file read in (ccrbtri).\n");
+	
+/******************************************/
 
+/****	Output Results for Unit Triangular Solvers	****/
+	printf("\nRESULTS: average timing for %d executions.\n", loop);
+	printf("(Single-threaded) CPU_tri_solver execution time: %fs\n", cpuTime/loop);
+	printf("cuSPARSE_tri_solver execution time: %fs\n", cusparseTriSolverTime/loop);
+	//printf("myGpuLowerSolver_1 execution time: %fs\n", myGpuSolver1Time/loop);
+	printf("\nRESULTS: total times for %d executions.\n", loop);
+	printf("(Single-threaded) CPU_tri_solver execution time: %fs\n", cpuTime);
+	printf("cuSPARSE_tri_solver execution time: %fs\n", cusparseTriSolverTime);
+	//printf("myGpuLowerSolver_1 execution time: %fs\n", myGpuSolver1Time);
+/***********************************************************/
+
+/****	Free Resources	****/
+	//Free Vectors
+	free(r);
+	free(x_correct);
+/***************************/
 	return 0;
 }

@@ -1,22 +1,13 @@
 /* This file reads in the matrix market file into memory in coordinate list format */
-/* Then function sparsifymm2csr() is called to convert into csr format */
+/* Then function sparsifymm2ccrbtri() is called to convert into ccrbtri format */
 
 #include <stdio.h>
 #include <stdlib.h>
 #include "mmio.h"
-#include "sparsifymm2csr.h"
+#include "sparsifymm2ccrbtri.h"
 
-//Function to read in matrix market file using mmio library
-/* Pararms:
-*  fname: file name of matrix to be read in
-*  AA: stores matrix values
-*  IA: stores row pointers (indicates where each rows starts and ends in AA array)
-*  JA: stores column indices (the column of the original matrix)
-*  DA: stores the diagonal values' corresponding indices in AA
-*  arrsize: the dimension size n of an nxn square matrix
-*  nnz: the total number of non zero elements in the sparse matrix
-*/
-void mm2csr(char *fname, double **AA_ptr, int **IA_ptr, int **JA_ptr, int **DA_ptr, int *arrsize, int *nnz)
+//Function to read in matrix market file using mmio library into special storage format: compressed column row block triangular storage format
+void mm2ccrbtri(char *fname)
 {
     int ret_code;
     MM_typecode matcode;
@@ -79,7 +70,7 @@ void mm2csr(char *fname, double **AA_ptr, int **IA_ptr, int **JA_ptr, int **DA_p
     /* convert to CSR format */
     /*************************/
 
-    sparsifymm2csr(nentry, I, J, val, AA_ptr, IA_ptr, JA_ptr, DA_ptr, arrsize, nnz);
+    sparsifymm2ccrbtri(nentry, I, J, val);
 
     /************************/
     /* now write out matrix */
