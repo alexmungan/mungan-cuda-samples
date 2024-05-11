@@ -34,7 +34,7 @@ int main() {
 	int arrsize, nnz;
 
 	//Get the test matrix 
-	char *filepath = "../../data/matrices/sparse/posdef/bmwcra_1.mtx";
+	char *filepath = "../../data/matrices/sparse/posdef/bcsstk13.mtx";
 	mm2csr(filepath, &AA, &IA, &JA, &DA, &arrsize, &nnz);
 	printf("Matrix file read in.\n");
 	
@@ -382,9 +382,9 @@ int main() {
 /******************************************************/
 
 /****	Profile my first unoptimized GPU tri solver ****/
-	/*printf("Running myGpuLowerSolver_1...");
+	//printf("Running myGpuLowerSolver_1...");
 	double *d_x;
-	gpuErrchk(cudaMalloc((void**)&d_x, vecSize));
+	/*gpuErrchk(cudaMalloc((void**)&d_x, vecSize));
 	gpuErrchk(cudaMemcpy(d_x, r, vecSize, cudaMemcpyHostToDevice));
 	
     	startTime = clock();
@@ -481,9 +481,59 @@ int main() {
 /***************************/
 
 /****	Profile my Optimized GPU tri solver ****/	
-	mm2ccrbtri(filepath);
-	printf("Matrix file read in (ccrbtri).\n");
+	printf("Running myGpuLowerSolver_2...");
+	//gpuErrchk(cudaMalloc((void**)&d_x, vecSize));
+	//gpuErrchk(cudaMemcpy(d_x, r, vecSize, cudaMemcpyHostToDevice));
 	
+    	startTime = clock();
+	printf("Reading in matrix into special storage format!\n");
+	mm2ccrbtri(filepath);
+	stopTime = clock();
+	double analysisTime = ((double)stopTime-startTime)/CLOCKS_PER_SEC;
+	printf("Matrix file read in (ccrbtri) in %fs.\n", analysisTime);
+	
+	startTime = clock();
+	
+	//Copy matrix to gpu
+	/*struct block *d_upperBlocks;
+	gpuErrchk(cudaMalloc(&d_upperBlocks, numOfBlocks*sizeof(*d_upperBlocks)));
+	for(int i = 0; i < numOfBlocks; i++) {
+		int blocksTotal = upperBlocks[i].iterCount;
+		int numOfIterations = upperBlocks[i].numOfIterations;
+		gpuErrchk(cudaMalloc(&d_upperBlocks[i].values, blocksTotal * sizeof(double)));
+		gpuErrchk(cudaMemcpy(d_upperBlocks[i].values, upperBlocks[i].values, blocksTotal*sizeof(double), cudaMemcpyHostToDevice));
+		gpuErrchk(cudaMemcpy(&d_upperBlocks[i].iterCount, &blocksTotal, sizeof(int), cudaMemcpyHostToDevice));
+		gpuErrchk(cudaMemcpy(&d_upperBlocks[i].numOfIterations, &numOfIterations, sizeof(int), cudaMemcpyHostToDevice));
+		gpuErrchk(cudaMalloc(&d_upperBlocks[i].iterPtrs, (numOfIterations+1) * sizeof(int)));
+		gpuErrchk(cudaMemcpy(d_upperBlocks[i].iterPtrs, upperBlocks[i].iterPtrs, (numOfIterations+1) * sizeof(int), cudaMemcpyHostToDevice));
+		gpuErrchk(cudaMalloc(&d_upperBlocks[i].row, blocksTotal * sizeof(int)));
+		gpuErrchk(cudaMemcpy(d_upperBlocks[i].row, upperBlocks[i].row, blocksTotal * sizeof(int), cudaMemcpyHostToDevice));
+		gpuErrchk(cudaMalloc(&d_upperBlocks[i].col, blocksTotal * sizeof(int)));
+		gpuErrchk(cudaMemcpy(d_upperBlocks[i].col, upperBlocks[i].col, blocksTotal * sizeof(int), cudaMemcpyHostToDevice));
+	}
+	
+	/** Kernel **/
+	
+	/************/
+	
+	stopTime = clock();
+	double myGpuSolver2Time = ((double)stopTime-startTime)/CLOCKS_PER_SEC;
+	
+	//Copy results back
+	
+	//Test for correctness
+	
+	//free gpu
+	//gpuErrchk(cudaFree(d_x));
+	/*for(int i = 0; i < numOfBlocks; i++) {
+		gpuErrchk(cudaFree(d_upperBlocks[i].values));
+		gpuErrchk(cudaFree(d_upperBlocks[i].iterPtrs));
+		gpuErrchk(cudaFree(d_upperBlocks[i].row));
+		gpuErrchk(cudaFree(d_upperBlocks[i].col));
+	}
+	gpuErrchk(cudaFree(d_upperBlocks));
+	
+	//free cpu??? -- err, system will automatically clean up upon program exit
 /******************************************/
 
 /****	Output Results for Unit Triangular Solvers	****/
@@ -491,13 +541,17 @@ int main() {
 	printf("(Single-threaded) CPU_tri_solver execution time: %fs\n", cpuTime/loop);
 	printf("cuSPARSE_tri_solver execution time: %fs\n", cusparseTriSolverTime/loop);
 	//printf("myGpuLowerSolver_1 execution time: %fs\n", myGpuSolver1Time/loop);
+	printf("myGpuLowerSolver_2 execution time: %fs\n", myGpuSolver2Time/loop);	
 	printf("\nRESULTS: total times for %d executions.\n", loop);
 	printf("(Single-threaded) CPU_tri_solver execution time: %fs\n", cpuTime);
 	printf("cuSPARSE_tri_solver execution time: %fs\n", cusparseTriSolverTime);
 	//printf("myGpuLowerSolver_1 execution time: %fs\n", myGpuSolver1Time);
+	printf("myGpuLowerSolver_2 execution time: %fs\n", myGpuSolver2Time);		
 /***********************************************************/
 
 /****	Free Resources	****/
+	//Free buffers from global header
+	
 	//Free Vectors
 	free(r);
 	free(x_correct);

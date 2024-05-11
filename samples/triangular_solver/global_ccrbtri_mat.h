@@ -7,21 +7,25 @@
 extern "C" {
 #endif
 
+#include <stdbool.h>
 #define TRI_SOLVER_BLOCK_SIZE 32
 
 struct block {
 	double *values; //values of the AA array
-	int *iterPtrs;	//stores indices indicating (in the values arr) where each iteration starts and ends
 	int iterCount;
-	bool iterated;
 	int numOfIterations; //number of iterations needed for this block
+	int *iterPtrs;	//stores indices indicating (in the values arr) where each iteration starts and ends
 	int *row; //the row index of the element
 	int *col; //the col index of the element
+	bool iterated;
 };
 
-//upperBlocks holds information about matrix needed for upper triangle solver
+//upperBlocks holds information about matrix needed for upper + lower triangle solver
 extern struct block *upperBlocks;
 extern struct block *lowerBlocks;
+
+//Total number of blocks 
+extern int numOfBlocks;
 
 //holds the diagonal values
 extern double *diag;

@@ -9,6 +9,7 @@
 struct block *upperBlocks;
 struct block *lowerBlocks;
 double *diag;
+int numOfBlocks;
 
 #define TINYNUM 1.e-14
 
@@ -97,22 +98,31 @@ int sparsifymm2ccrbtri(int nentry, int rowidx[], int colidx[], double val[])
 // allocate memory
    diag = malloc(arrsize*sizeof(double));
    int blocksCount = ceil(((double)arrsize)/TRI_SOLVER_BLOCK_SIZE);
-   upperBlocks = malloc(blocksCount * sizeof(*upperBlocks));
-   lowerBlocks = malloc(blocksCount * sizeof(*lowerBlocks));   
+   numOfBlocks = blocksCount;
+   upperBlocks = malloc(blocksCount * sizeof(struct block));
+   lowerBlocks = malloc(blocksCount * sizeof(struct block));   
+   if(!upperBlocks || !lowerBlocks) {
+   	fprintf(stderr, "Failed memory allocations!\n");
+   	exit(EXIT_FAILURE);
+   }
 
 // additional working buffers to perform the analysis
-   bool *upper_ready = (bool *)malloc(arrsize * sizeof(*upper_ready)); //says whether the value is ready to be added to the current iteration: 0 is not ready, 1 is ready
-   bool *lower_ready = (bool *)malloc(arrsize * sizeof(*lower_ready));
-   memset(upper_ready, true, arrsize*sizeof(*upper_ready));
-   memset(lower_ready, true, arrsize*sizeof(*lower_ready));
-   bool *upper_added = (bool *)malloc(nnz * sizeof(*upper_added));     //says whether the value has already been added to values or not
-   bool *lower_added = (bool *)malloc(nnz * sizeof(*upper_added));
-   memset(upper_added, false, nnz*sizeof(*upper_added));
-   memset(lower_added, false, nnz*sizeof(*lower_added));
-   int *upper_rowSizes = (int *)malloc((arrsize+1) * sizeof(int));
-   memset(upper_rowSizes, 0, (arrsize+1)*sizeof(*upper_rowSizes));
-   int *lower_rowSizes = (int *)malloc((arrsize+1) * sizeof(int));
-   memset(lower_rowSizes, 0, (arrsize+1)*sizeof(*lower_rowSizes));
+   bool *upper_ready = malloc(arrsize * sizeof(bool)); //says whether the value is ready to be added to the current iteration: 0 is not ready, 1 is ready
+   bool *lower_ready = malloc(arrsize * sizeof(bool));
+   memset(upper_ready, true, arrsize*sizeof(bool));
+   memset(lower_ready, true, arrsize*sizeof(bool));
+   bool *upper_added = malloc(nlower * sizeof(*upper_added));     //says whether the value has already been added to values or not
+   bool *lower_added = malloc(nlower * sizeof(*lower_added));
+   memset(upper_added, false, nlower*sizeof(*upper_added));
+   memset(lower_added, false, nlower*sizeof(*lower_added));
+   int *upper_rowSizes = malloc(arrsize * sizeof(int));
+   memset(upper_rowSizes, 0, arrsize*sizeof(*upper_rowSizes));
+   int *lower_rowSizes = malloc(arrsize * sizeof(int));
+   memset(lower_rowSizes, 0, arrsize*sizeof(*lower_rowSizes));
+   if(!upper_ready || !lower_ready || !upper_added || !lower_added || !upper_rowSizes || !lower_rowSizes) {
+   	fprintf(stderr, "Failed memory allocations!\n");
+   	exit(EXIT_FAILURE);
+   }
    
    /**** coo matrix holds only upper triangle ****/
    /*if(upperLowerFull == 0) { 
@@ -151,46 +161,58 @@ int sparsifymm2ccrbtri(int nentry, int rowidx[], int colidx[], double val[])
         for(int i = 0; i < blocksCount; i++) {
         //Initialize / allocate each LOWER block's internal fields (Note: for lower tri solver, cuda blocks map to the matrix's rows from top to bottom)
             //Get range of rows that the block is responsible for
-            int startRow = blocksCount * TRI_SOLVER_BLOCK_SIZE;
+            int startRow = i * TRI_SOLVER_BLOCK_SIZE;
             int endRow = startRow + TRI_SOLVER_BLOCK_SIZE - 1; 
+            //printf("blockIDX = %d\n", i);
+            //printf("startRow = %d\n", startRow);
+            //printf("endRow = %d\n", endRow);
             //Get total number of elements in the row's that block is responsible for
             int total = 0;
             for(int r = startRow; r <= endRow; r++) {
             	if(r < arrsize) { //Prevent out of bounds access if the last block maps past the matrix (b/c arrsize is not divisble by TRI_SOLVER_BLOCK_SIZE)
             	    total += lower_rowSizes[r]; 
+            	    //printf("lower_rowSizes[%d] = %d\n", r, lower_rowSizes[r]);
             	} 
             }
+            //printf("total = %d\n", total);
             //Finally, allocate values buffer to hold 'total' # of elements
-   	    lowerBlocks[i].values = (double *)malloc(total * sizeof(double));
-   	    lowerBlocks[i].iterPtrs = (int *)malloc(arrsize * sizeof(int));
-   	    lowerBlocks[i].iterPtrs[0] = 0;
-   	    lowerBlocks[i].iterCount = 0;
-   	    lowerBlocks[i].iterated = false;
-   	    lowerBlocks[i].numOfIterations = 0; 
-   	    lowerBlocks[i].row = (int *)malloc(nlower * sizeof(int)); 
-   	    lowerBlocks[i].col = (int *)malloc(nlower * sizeof(int));
+            struct block *temp = &lowerBlocks[i];
+   	    temp->values = malloc(total * sizeof(double));
+   	    temp->iterPtrs = malloc((arrsize+1) * sizeof(int));
+   	    temp->iterPtrs[0] = 0;
+   	    temp->iterCount = 0;
+   	    temp->iterated = false;
+   	    temp->numOfIterations = 0; 
+   	    temp->row = malloc(total * sizeof(int)); 
+   	    temp->col = malloc(total * sizeof(int));
+   	    if(!temp->values || !temp->iterPtrs || !temp->row || !temp->col) {
+   		fprintf(stderr, "Failed memory allocations!\n");
+   		exit(EXIT_FAILURE);
+   	    }
    	//Initialize / allocate each UPPER block's internal fields (Note: for upper tri solver, cuda blocks map to the matrix's rows from bottom to top)
-   	    //Get range of rows that the block is responsible for
-            startRow = (arrsize - 1) - (blocksCount * TRI_SOLVER_BLOCK_SIZE);
-            endRow = startRow - TRI_SOLVER_BLOCK_SIZE + 1; 
             //Get total number of elements in the row's that block is responsible for
             total = 0;
-            for(int r = startRow; r >= endRow; r--) {
-            	if(r >= 0) { //Prevent out of bounds access if the last block maps past the matrix (b/c arrsize is not divisble by TRI_SOLVER_BLOCK_SIZE)
+            for(int r = startRow; r <= endRow; r++) {
+            	if(r < arrsize) { //Prevent out of bounds access if the last block maps past the matrix (b/c arrsize is not divisble by TRI_SOLVER_BLOCK_SIZE)
             	    total += upper_rowSizes[r]; 
             	} 
             }
             //Finally, allocate values buffer to hold 'total' # of elements
-   	    upperBlocks[i].values = (double *)malloc(total * sizeof(double));
-   	    upperBlocks[i].iterPtrs = (int *)malloc(arrsize * sizeof(int));
-   	    upperBlocks[i].iterPtrs[0] = 0;
-   	    upperBlocks[i].iterCount = 0;
-   	    upperBlocks[i].iterated = false;
-   	    upperBlocks[i].numOfIterations = 0; 
-   	    upperBlocks[i].row = (int *)malloc(nlower * sizeof(int)); 
-   	    upperBlocks[i].col = (int *)malloc(nlower * sizeof(int));
+            struct block *tempUpper = &upperBlocks[i];
+   	    tempUpper->values = malloc(total * sizeof(double));
+   	    tempUpper->iterPtrs = malloc((arrsize+1) * sizeof(int));
+   	    tempUpper->iterPtrs[0] = 0;
+   	    tempUpper->iterCount = 0;
+   	    tempUpper->iterated = false;
+   	    tempUpper->numOfIterations = 0; 
+   	    tempUpper->row = malloc(total * sizeof(int)); 
+   	    tempUpper->col = malloc(total * sizeof(int));
+   	    if(!tempUpper->values || !tempUpper->iterPtrs || !tempUpper->row || !tempUpper->col) {
+   		fprintf(stderr, "Failed memory allocations!\n");
+   		exit(EXIT_FAILURE);
+   	    }
         }
-        /*
+        
    	//Get the ccrbri matrix 
    	bool finished = false;
    	int iterno = 0;
@@ -199,10 +221,9 @@ int sparsifymm2ccrbtri(int nentry, int rowidx[], int colidx[], double val[])
    	    iterno++;
    	    //Each loop iteration corresponds to an parallel iteration to be stored in each block's storage
    	    for(n = 0; n < nentry; n++) {
-   	    	int myval = val[n];
+   	    	double myval = val[n];
    	    	i = rowidx[n];
            	j = colidx[n];
-           	if(i == -1) continue;
            	if(lower_ready[j] && !lower_added[n]) {
            	        finished = false;
            		int blockIdx = floor((double)i / TRI_SOLVER_BLOCK_SIZE);
@@ -212,12 +233,17 @@ int sparsifymm2ccrbtri(int nentry, int rowidx[], int colidx[], double val[])
            		temp->row[temp->iterCount] = i;
            		temp->col[temp->iterCount] = j;
            		temp->iterCount++;
-           		lower_added[n] = true;       		
+           		lower_added[n] = true;
+           		//check to see if we just finished solving for some x that iteration
+           		lower_rowSizes[i]--;
+           		if(lower_rowSizes[i] == 0) {
+           			lower_ready[i] == true; 
+           		}       		
            	}
            	
            	if(upper_ready[i] && !upper_added[n]) {
            	        finished = false;
-           	        int blockIdx = blocksCount - 1 - floor((double)j / TRI_SOLVER_BLOCK_SIZE);
+           	        int blockIdx = floor((double)i / TRI_SOLVER_BLOCK_SIZE);
            	        struct block *temp = &upperBlocks[blockIdx];
            	        temp->iterated = true;
            	        temp->values[temp->iterCount] = myval;
@@ -225,13 +251,22 @@ int sparsifymm2ccrbtri(int nentry, int rowidx[], int colidx[], double val[])
            	        temp->col[temp->iterCount] = i;
            	        temp->iterCount++;
            	        upper_added[n] = true;
+           	        //check to see if we just finished solving for some x that iteration
+           	        upper_rowSizes[j]--;
+           	        if(upper_rowSizes[j] == 0) {
+           	        	upper_ready[j] == true;
+           	        }
            	}
+           	
    	    }
+   	    
+   	    lower_ready[iterno] = true;
+   	    upper_ready[(arrsize-1) - iterno] = true;
    	    
    	    if(finished) 
    	    	break;
    	    
-   	  
+   	    
    	    //Set lower iter array
    	    for(int b = 0; b < blocksCount; b++) {
    	     	struct block *tempLower = &lowerBlocks[b];
@@ -248,9 +283,9 @@ int sparsifymm2ccrbtri(int nentry, int rowidx[], int colidx[], double val[])
    	    		tempUpper->iterated = false;
    	     	}
             }
-   	
+            
    	}
-   	*/
+   	
    }
    /**** coo matrix holds the entire symmetric matrix (upper and lower) *******/
    /*else if (upperLowerFull == 2) { 
@@ -271,5 +306,13 @@ int sparsifymm2ccrbtri(int nentry, int rowidx[], int colidx[], double val[])
            }
    	}
    }*/
+   
+   //free resources
+   free(upper_ready);
+   free(lower_ready);
+   free(upper_added);
+   free(lower_added);
+   free(upper_rowSizes);
+   free(lower_rowSizes);   
    return 0; //success
 }
