@@ -23,7 +23,7 @@
 
 //Random number generator
 double RNG(double min, double max) {
-    double scale = rand() / (double)RAND_MAX;  // [0, 1]
+    double scale = ((double)rand()) / RAND_MAX;  // [0, 1]
     return min + scale * (max - min);          // [min, max]
 }
 
@@ -51,12 +51,12 @@ int main() {
     	gpuErrchk(cudaMemcpy(d_JA, JA, nnz*sizeof(int), cudaMemcpyHostToDevice));
     	//gpuErrchk(cudaMemcpy(d_DA, DA, arrsize*sizeof(int), cudaMemcpyHostToDevice));
 
-	//Generate random RHS for testing
+	//Generate RHS for testing
 	size_t vecSize = sizeof(double) * arrsize;
 	double *r = (double *)malloc(vecSize);
 	srand( time(NULL) );
-    	for(int i = 0; i < arrsize; i++) r[i] = RNG(-DBL_MAX, DBL_MAX);
-    	//for(int i = 0; i < arrsize; i++) printf("r[%d] = %f\n", i, r[i]);
+    	for(int i = 0; i < arrsize; i++) r[i] = 10.00 /*RNG(-50, 50)*/;
+    	for(int i = 0; i < arrsize; i++) printf("r[%d] = %f\n", i, r[i]);
 
 /****	Run CPU solver (results used for correctness checks)	****/
 	double *x_correct = (double *)malloc(vecSize);
@@ -482,56 +482,125 @@ int main() {
 
 /****	Profile my Optimized GPU tri solver ****/	
 	printf("Running myGpuLowerSolver_2...");
-	//gpuErrchk(cudaMalloc((void**)&d_x, vecSize));
-	//gpuErrchk(cudaMemcpy(d_x, r, vecSize, cudaMemcpyHostToDevice));
+	gpuErrchk(cudaMalloc((void**)&d_x, vecSize));
+	gpuErrchk(cudaMemcpy(d_x, r, vecSize, cudaMemcpyHostToDevice));
 	
     	startTime = clock();
 	printf("Reading in matrix into special storage format!\n");
+	//char *testfilepath = "../../data/matrices/sparse/posdef/mymatrix.mtx";
+	//char *test2filepath = "../../data/matrices/sparse/posdef/bmwcra_1.mtx";
 	mm2ccrbtri(filepath);
 	stopTime = clock();
 	double analysisTime = ((double)stopTime-startTime)/CLOCKS_PER_SEC;
 	printf("Matrix file read in (ccrbtri) in %fs.\n", analysisTime);
 	
+	//test returned matrix
+	/*for(int i = 0; i < numOfBlocks; i++) {
+		printf("\n\nBlock: %d\n", i);
+		for(int j = 0; j < upperBlocks[i].iterCount; j++) {
+			printf("upperval[%d] = %f\n", j, upperBlocks[i].values[j]);
+		}
+	}
+	
+	for(int i = 0; i < numOfBlocks; i++) {
+		printf("\n\nBlock: %d\n", i);
+		for(int j = 0; j < lowerBlocks[i].iterCount; j++) {
+			printf("lowerval[%d] = %f\n", j, lowerBlocks[i].values[j]);
+		}
+	}
+	*/
 	startTime = clock();
 	
 	//Copy matrix to gpu
-	/*struct block *d_upperBlocks;
-	gpuErrchk(cudaMalloc(&d_upperBlocks, numOfBlocks*sizeof(*d_upperBlocks)));
+	//Intermediate struct - the struct itself is on the host, but the internal buffers will be allocated on the GPU (we have to do this before copying 
+	struct block *i_upperBlocks = (block*)malloc(numOfBlocks*sizeof(i_upperBlocks)); 
+	printf("HERE1\n");
 	for(int i = 0; i < numOfBlocks; i++) {
 		int blocksTotal = upperBlocks[i].iterCount;
+		printf("HERE2\n");
 		int numOfIterations = upperBlocks[i].numOfIterations;
-		gpuErrchk(cudaMalloc(&d_upperBlocks[i].values, blocksTotal * sizeof(double)));
-		gpuErrchk(cudaMemcpy(d_upperBlocks[i].values, upperBlocks[i].values, blocksTotal*sizeof(double), cudaMemcpyHostToDevice));
-		gpuErrchk(cudaMemcpy(&d_upperBlocks[i].iterCount, &blocksTotal, sizeof(int), cudaMemcpyHostToDevice));
-		gpuErrchk(cudaMemcpy(&d_upperBlocks[i].numOfIterations, &numOfIterations, sizeof(int), cudaMemcpyHostToDevice));
-		gpuErrchk(cudaMalloc(&d_upperBlocks[i].iterPtrs, (numOfIterations+1) * sizeof(int)));
-		gpuErrchk(cudaMemcpy(d_upperBlocks[i].iterPtrs, upperBlocks[i].iterPtrs, (numOfIterations+1) * sizeof(int), cudaMemcpyHostToDevice));
-		gpuErrchk(cudaMalloc(&d_upperBlocks[i].row, blocksTotal * sizeof(int)));
-		gpuErrchk(cudaMemcpy(d_upperBlocks[i].row, upperBlocks[i].row, blocksTotal * sizeof(int), cudaMemcpyHostToDevice));
-		gpuErrchk(cudaMalloc(&d_upperBlocks[i].col, blocksTotal * sizeof(int)));
-		gpuErrchk(cudaMemcpy(d_upperBlocks[i].col, upperBlocks[i].col, blocksTotal * sizeof(int), cudaMemcpyHostToDevice));
+		printf("HERE3\n");
+		i_upperBlocks[i].iterCount = blocksTotal;
+		printf("HERE4\n");
+		i_upperBlocks[i].numOfIterations = numOfIterations;	
+		printf("HERE5\n");
+		i_upperBlocks[i].startRow = upperBlocks[i].startRow;	
+		printf("HERE6\n");
+		i_upperBlocks[i].endRow = upperBlocks[i].endRow;
+		printf("HERE7\n");	
+		gpuErrchk(cudaMalloc(&i_upperBlocks[i].values, blocksTotal * sizeof(double)));
+		printf("HERE8\n");
+		gpuErrchk(cudaMemcpy(i_upperBlocks[i].values, upperBlocks[i].values, blocksTotal*sizeof(double), cudaMemcpyHostToDevice));
+		printf("HERE9\n");
+		gpuErrchk(cudaMalloc(&i_upperBlocks[i].iterPtrs, (numOfIterations+1) * sizeof(int)));	
+		printf("HERE10\n");
+		gpuErrchk(cudaMemcpy(i_upperBlocks[i].iterPtrs, upperBlocks[i].iterPtrs, (numOfIterations+1) * sizeof(int), cudaMemcpyHostToDevice));	
+		printf("HERE11\n");
+		gpuErrchk(cudaMalloc(&i_upperBlocks[i].row, blocksTotal * sizeof(int)));
+		printf("HERE12\n");		
+		gpuErrchk(cudaMemcpy(i_upperBlocks[i].row, upperBlocks[i].row, blocksTotal * sizeof(int), cudaMemcpyHostToDevice));		
+		printf("HERE13\n");
+		gpuErrchk(cudaMalloc(&i_upperBlocks[i].col, blocksTotal * sizeof(int)));
+		printf("HERE14\n");
+		gpuErrchk(cudaMemcpy(i_upperBlocks[i].col, upperBlocks[i].col, blocksTotal * sizeof(int), cudaMemcpyHostToDevice));		
+		printf("HERE15\n");				
 	}
+	printf("HERE16\n");
+	
+	struct block *d_upperBlocks;
+	gpuErrchk(cudaMalloc(&d_upperBlocks, numOfBlocks*sizeof(*d_upperBlocks)));
+	printf("HERE17\n");
+	gpuErrchk(cudaMemcpy(d_upperBlocks, i_upperBlocks, numOfBlocks*sizeof(*d_upperBlocks), cudaMemcpyHostToDevice));
+	printf("HERE18\n");
 	
 	/** Kernel **/
-	
+ 	cudaStream_t streams[numOfBlocks];
+ 	for(int i = 0; i < numOfBlocks; i++) {
+ 		gpuErrchk(cudaStreamCreate(&streams[i]));
+ 	}
+ 	printf("HERE19\n");
+	//myGpuLowerTriSolver_2(upperBlocks, d_upperBlocks, d_x, arrsize, numOfBlocks, streams);
+	printf("HERE20\n");
 	/************/
 	
 	stopTime = clock();
 	double myGpuSolver2Time = ((double)stopTime-startTime)/CLOCKS_PER_SEC;
 	
 	//Copy results back
+	double *x_myGpuSolver_2 = (double *)malloc(vecSize);
+	gpuErrchk(cudaMemcpy(x_myGpuSolver_2, d_x, vecSize, cudaMemcpyDeviceToHost));
 	
-	//Test for correctness
+	//TEST FOR CORRECTNESS
+	passed = true;
+	for(int i = 0; i < arrsize; i++) {
+		if(abs(x_myGpuSolver_2[i] - x_correct[i]) > eps) {
+			passed = false;
+			fprintf(stderr, "myGpuLowerSolver_2 failed at d_x[%d] = %f, x[%d] = %f!\n", i, x_myGpuSolver_2[i], i, x_correct[i]);
+		}
+	}
+	if(passed)
+		printf("myGpuLowerSolver2 PASS\n"); 
+	
+	free(x_myGpuSolver_2);	
 	
 	//free gpu
-	//gpuErrchk(cudaFree(d_x));
+	for(int i = 0; i < numOfBlocks; i++) {
+		gpuErrchk(cudaStreamDestroy(streams[i]));
+ 	}
+	gpuErrchk(cudaFree(d_x));
+	printf("HERE11\n");
 	/*for(int i = 0; i < numOfBlocks; i++) {
 		gpuErrchk(cudaFree(d_upperBlocks[i].values));
+		printf("HERE12\n");
 		gpuErrchk(cudaFree(d_upperBlocks[i].iterPtrs));
+		printf("HERE13\n");
 		gpuErrchk(cudaFree(d_upperBlocks[i].row));
+		printf("HERE14\n");
 		gpuErrchk(cudaFree(d_upperBlocks[i].col));
+		printf("HERE15\n");
 	}
-	gpuErrchk(cudaFree(d_upperBlocks));
+	gpuErrchk(cudaFree(d_upperBlocks));*/
+	printf("HERE16\n");
 	
 	//free cpu??? -- err, system will automatically clean up upon program exit
 /******************************************/

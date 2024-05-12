@@ -62,6 +62,8 @@ void mm2ccrbtri(char *fname)
         fscanf(f, "%d %d %lg\n", &I[i], &J[i], &val[i]);
         I[i]--;  /* adjust from 1-based to 0-based */
         J[i]--;
+        //printf("i = %d\n", i);
+        //printf("(%d,%d) = %f\n", I[i], J[i], val[i]);
     }
 
     if (f !=stdin) fclose(f);

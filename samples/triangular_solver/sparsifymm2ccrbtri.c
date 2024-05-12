@@ -34,6 +34,7 @@ int sparsifymm2ccrbtri(int nentry, int rowidx[], int colidx[], double val[])
    for (n = 0; n < nentry; n++) {
        i = rowidx[n]; // row index
        j = colidx[n]; // col index
+       //printf("(%d,%d) = %f\n", i, j, val[n]);
        if (i > imax) imax = i;
        if (j > jmax) jmax = j;
 
@@ -98,6 +99,7 @@ int sparsifymm2ccrbtri(int nentry, int rowidx[], int colidx[], double val[])
 // allocate memory
    diag = malloc(arrsize*sizeof(double));
    int blocksCount = ceil(((double)arrsize)/TRI_SOLVER_BLOCK_SIZE);
+   //printf("BLOCKSCOUNT = %d\n", blocksCount);
    numOfBlocks = blocksCount;
    upperBlocks = malloc(blocksCount * sizeof(struct block));
    lowerBlocks = malloc(blocksCount * sizeof(struct block));   
@@ -111,10 +113,11 @@ int sparsifymm2ccrbtri(int nentry, int rowidx[], int colidx[], double val[])
    bool *lower_ready = malloc(arrsize * sizeof(bool));
    memset(upper_ready, true, arrsize*sizeof(bool));
    memset(lower_ready, true, arrsize*sizeof(bool));
-   bool *upper_added = malloc(nlower * sizeof(*upper_added));     //says whether the value has already been added to values or not
-   bool *lower_added = malloc(nlower * sizeof(*lower_added));
-   memset(upper_added, false, nlower*sizeof(*upper_added));
-   memset(lower_added, false, nlower*sizeof(*lower_added));
+   printf("nLower = %d, nentry = %d\n", nlower, nentry);
+   bool *upper_added = malloc(nentry * sizeof(*upper_added));     //says whether the value has already been added to values or not
+   bool *lower_added = malloc(nentry * sizeof(*lower_added));
+   memset(upper_added, false, nentry*sizeof(*upper_added));
+   memset(lower_added, false, nentry*sizeof(*lower_added));
    int *upper_rowSizes = malloc(arrsize * sizeof(int));
    memset(upper_rowSizes, 0, arrsize*sizeof(*upper_rowSizes));
    int *lower_rowSizes = malloc(arrsize * sizeof(int));
@@ -158,6 +161,22 @@ int sparsifymm2ccrbtri(int nentry, int rowidx[], int colidx[], double val[])
            }
    	}
    	
+   	/*for(int i = 0; i < arrsize; i++) {
+   		printf("upper_ready[%d] = %d\n", i, upper_ready[i]);
+   	}
+   	for(int i = 0; i < arrsize; i++) {
+   		printf("lower_ready[%d] = %d\n", i, lower_ready[i]);
+   	}
+   	for(int i = 0; i < arrsize; i++) {
+   		printf("diag[%d] = %f\n", i, diag[i]);
+   	}
+   	for(int i = 0; i < arrsize; i++) {
+   		printf("size of (upper) row %d is %d\n", i, upper_rowSizes[i]);
+   	}
+   	for(int i = 0; i < arrsize; i++) {
+   		printf("size of (lower) row %d is %d\n", i, lower_rowSizes[i]);
+   	}*/
+   	
         for(int i = 0; i < blocksCount; i++) {
         //Initialize / allocate each LOWER block's internal fields (Note: for lower tri solver, cuda blocks map to the matrix's rows from top to bottom)
             //Get range of rows that the block is responsible for
@@ -174,9 +193,13 @@ int sparsifymm2ccrbtri(int nentry, int rowidx[], int colidx[], double val[])
             	    //printf("lower_rowSizes[%d] = %d\n", r, lower_rowSizes[r]);
             	} 
             }
+            //printf("Total elements for lower block %d is %d\n", i, total);
             //printf("total = %d\n", total);
             //Finally, allocate values buffer to hold 'total' # of elements
             struct block *temp = &lowerBlocks[i];
+            temp->startRow = startRow;
+            temp->endRow = endRow;
+            temp->total = total;
    	    temp->values = malloc(total * sizeof(double));
    	    temp->iterPtrs = malloc((arrsize+1) * sizeof(int));
    	    temp->iterPtrs[0] = 0;
@@ -197,8 +220,12 @@ int sparsifymm2ccrbtri(int nentry, int rowidx[], int colidx[], double val[])
             	    total += upper_rowSizes[r]; 
             	} 
             }
+            //printf("Total elements for upper block %d is %d\n", i, total);
             //Finally, allocate values buffer to hold 'total' # of elements
             struct block *tempUpper = &upperBlocks[i];
+            tempUpper->startRow = startRow;
+            tempUpper->endRow = endRow;
+            tempUpper->total = total;
    	    tempUpper->values = malloc(total * sizeof(double));
    	    tempUpper->iterPtrs = malloc((arrsize+1) * sizeof(int));
    	    tempUpper->iterPtrs[0] = 0;
@@ -217,6 +244,7 @@ int sparsifymm2ccrbtri(int nentry, int rowidx[], int colidx[], double val[])
    	bool finished = false;
    	int iterno = 0;
    	while(!finished) {
+   	    //printf("\nIteration: %d\n",iterno);
    	    finished = true; 
    	    iterno++;
    	    //Each loop iteration corresponds to an parallel iteration to be stored in each block's storage
@@ -224,11 +252,21 @@ int sparsifymm2ccrbtri(int nentry, int rowidx[], int colidx[], double val[])
    	    	double myval = val[n];
    	    	i = rowidx[n];
            	j = colidx[n];
+           	//printf("(%d,%d) = %f\n", i, j, myval);
+           	if(i == j) continue;
+           	//printf("lower_ready[%d] = %d, lower_added[%d] = %d\n", j, lower_ready[j], n, lower_added[n]);
            	if(lower_ready[j] && !lower_added[n]) {
+           		//printf("Entered if statement\n");
            	        finished = false;
            		int blockIdx = floor((double)i / TRI_SOLVER_BLOCK_SIZE);
+           		//printf("blockIdx = %d\n", blockIdx);
            		struct block *temp = &lowerBlocks[blockIdx];
            		temp->iterated = true;
+           		//printf("iterCount = %d, total = %d\n", temp->iterCount, temp->total);
+           		if(temp->iterCount >= temp->total) {
+           			fprintf(stderr, "Bug: Exceeded num of elements allocated vals/rows/cols. iterCount = %d, total = %d\n", temp->iterCount, temp->total);
+           			exit(EXIT_FAILURE);
+           		}
            		temp->values[temp->iterCount] = myval;
            		temp->row[temp->iterCount] = i;
            		temp->col[temp->iterCount] = j;
@@ -236,16 +274,28 @@ int sparsifymm2ccrbtri(int nentry, int rowidx[], int colidx[], double val[])
            		lower_added[n] = true;
            		//check to see if we just finished solving for some x that iteration
            		lower_rowSizes[i]--;
+           		//printf("lower_rowSizes[%d] = %d\n", i, lower_rowSizes[i]);
            		if(lower_rowSizes[i] == 0) {
-           			lower_ready[i] == true; 
+           			lower_ready[i] = true; 
+           			//printf("lower_ready[%d] = %d\n", i, lower_ready[i]);
+           		} else if (lower_rowSizes[i] < 0) {
+           			fprintf(stderr, "Error reading in matrix\n");
+           			exit(EXIT_FAILURE);
            		}       		
            	}
-           	
+           	//printf("upper_ready[%d] = %d, upper_added[%d] = %d\n", i, upper_ready[i], n, upper_added[n]);
            	if(upper_ready[i] && !upper_added[n]) {
+ 			//printf("Entered if statement\n");          	
            	        finished = false;
-           	        int blockIdx = floor((double)i / TRI_SOLVER_BLOCK_SIZE);
+           	        int blockIdx = floor((double)j / TRI_SOLVER_BLOCK_SIZE);
+           	        //printf("blockIdx = %d\n", blockIdx);
            	        struct block *temp = &upperBlocks[blockIdx];
            	        temp->iterated = true;
+           	        //printf("iterCount = %d, total = %d\n", temp->iterCount, temp->total);
+           		if(temp->iterCount >= temp->total) {
+           			fprintf(stderr, "Bug: Exceeded num of elements allocated vals/rows/cols. iterCount = %d, total = %d\n", temp->iterCount, temp->total);
+           			exit(EXIT_FAILURE);
+           		}
            	        temp->values[temp->iterCount] = myval;
            	        temp->row[temp->iterCount] = j;
            	        temp->col[temp->iterCount] = i;
@@ -253,15 +303,21 @@ int sparsifymm2ccrbtri(int nentry, int rowidx[], int colidx[], double val[])
            	        upper_added[n] = true;
            	        //check to see if we just finished solving for some x that iteration
            	        upper_rowSizes[j]--;
+           	        //printf("upper_rowSizes[%d] = %d\n", j, upper_rowSizes[j]);
            	        if(upper_rowSizes[j] == 0) {
-           	        	upper_ready[j] == true;
-           	        }
+ 				//printf("Element ready!\n");	          	        
+           	        	upper_ready[j] = true;
+           	        	//printf("upper_ready[%d] = %d\n", j, upper_ready[j]);
+           	        } else if (upper_rowSizes[j] < 0) {
+           			fprintf(stderr, "Error reading in matrix\n");
+           			exit(EXIT_FAILURE);
+           		}   
            	}
            	
    	    }
    	    
-   	    lower_ready[iterno] = true;
-   	    upper_ready[(arrsize-1) - iterno] = true;
+   	    //lower_ready[iterno] = true;
+   	    //upper_ready[(arrsize-1) - iterno] = true;
    	    
    	    if(finished) 
    	    	break;
@@ -271,6 +327,9 @@ int sparsifymm2ccrbtri(int nentry, int rowidx[], int colidx[], double val[])
    	    for(int b = 0; b < blocksCount; b++) {
    	     	struct block *tempLower = &lowerBlocks[b];
    	     	if(tempLower->iterated) {
+   	     		if(iterno >= (arrsize+1)) {
+   	     			fprintf(stderr, "Bug: out of bounds access. iterno = %d, arrsize+1 = %d\n", iterno, arrsize+1);
+   	     		}
    	     		tempLower->iterPtrs[iterno] = tempLower->iterCount;
    	    		tempLower->numOfIterations++;
    	    		tempLower->iterated = false;
@@ -278,6 +337,9 @@ int sparsifymm2ccrbtri(int nentry, int rowidx[], int colidx[], double val[])
    	     	
    	     	struct block *tempUpper = &upperBlocks[b];
    	     	if(tempUpper->iterated) {
+   	     		if(iterno >= (arrsize+1)) {
+   	     			fprintf(stderr, "Bug: out of bounds access. iterno = %d, arrsize+1 = %d\n", iterno, arrsize+1);
+   	     		}
    	     		tempUpper->iterPtrs[iterno] = tempUpper->iterCount;
    	    		tempUpper->numOfIterations++;
    	    		tempUpper->iterated = false;
@@ -287,6 +349,7 @@ int sparsifymm2ccrbtri(int nentry, int rowidx[], int colidx[], double val[])
    	}
    	
    }
+   //printf("HERE\n");
    /**** coo matrix holds the entire symmetric matrix (upper and lower) *******/
    /*else if (upperLowerFull == 2) { 
    	// store the number of entries of each row and get diagonal
@@ -309,10 +372,16 @@ int sparsifymm2ccrbtri(int nentry, int rowidx[], int colidx[], double val[])
    
    //free resources
    free(upper_ready);
+   //printf("HERE\n");
    free(lower_ready);
+   //printf("HERE\n");
    free(upper_added);
+   //printf("HERE\n");
    free(lower_added);
+   //printf("HERE\n");
    free(upper_rowSizes);
-   free(lower_rowSizes);   
+   //printf("HERE\n");
+   free(lower_rowSizes); 
+   //printf("HERE\n");  
    return 0; //success
 }

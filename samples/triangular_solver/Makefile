@@ -28,7 +28,7 @@ FLAGS = -O3 -I${lib_header_dir} -MMD -MP -lm -lcusparse
 
 #**** Targets ****
 cuTriSolve: ${OBJS}
-	${NVCC} $^ -o $@ ${FLAGS}
+	${NVCC} $^ -o $@ ${FLAGS} -arch=sm_75
 
 #Pull in dependency info for existing .o files
 -include $(OBJS:.o=.d)
@@ -38,7 +38,7 @@ ${lib_objs}: %.o: ${lib_src_dir}/%.c
 	${CC} -c $< -o $@ ${FLAGS}
 
 %.o: %.cu
-	${NVCC} -dc ${FLAGS}  $< -o $@
+	${NVCC} -dc ${FLAGS} -arch=sm_75 $< -o $@
 
 %.o: %.c
 	${CC} -c $< -o $@ ${FLAGS}  

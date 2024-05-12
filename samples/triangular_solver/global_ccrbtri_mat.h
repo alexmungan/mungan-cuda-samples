@@ -17,6 +17,9 @@ struct block {
 	int *iterPtrs;	//stores indices indicating (in the values arr) where each iteration starts and ends
 	int *row; //the row index of the element
 	int *col; //the col index of the element
+	int total;
+	int startRow;
+	int endRow;
 	bool iterated;
 };
 
